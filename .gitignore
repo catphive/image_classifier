@@ -1,0 +1,13 @@
+OpenCV-2.4.0
+opencv
+bikes
+cars
+TAGS
+tags
+test/test
+objrec
+*.jpg
+*.tar.bz2
+*.o
+*.d
+*.a
