@@ -17,7 +17,7 @@ all: objrec run_tests TAGS
 .PHONY: all
 
 TAGS: objrec test/test
-	ctags -eR --languages=-Java main.cpp include src test OpenCV-2.4.0 
+	ctags -eR --languages=-Java main.cpp include src test ~/src/opencv
 
 objrec: main.cpp src/libobjrec.a
 	g++ $(LDFLAGS) $(CXXFLAGS) $(CPPFLAGS) -o $@ main.cpp -Lsrc -lobjrec $(LDLIBS)

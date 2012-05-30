@@ -15,12 +15,14 @@
 #include <stdint.h>
 
 #include <stdexcept>
+#include <string>
 
 using namespace cv;
 
 using std::cout;
 using std::cerr;
 using std::endl;
+using std::string;
 
 std::ostream& operator<<(std::ostream& out, const cv::Size& size) {
     return out << "(" << size.height << ", " << size.width << ")";
@@ -196,16 +198,24 @@ void usage() {
     cerr << "USAGE: objrec positive_example_dir negative_example_dir" << endl;
 }
 
-Mat load_sift_descriptors(const string& image_name) {
+Mat load_sift_descriptors(const string& image_name,
+                          std::vector<KeyPoint>& keypoints,
+                          Mat& image) {
     SIFT sift;
-    std::vector<KeyPoint> keypoints;
     Mat descriptors;
-    Mat image = imread(image_name, 1);
+    image = imread(image_name, 1);
     if (!image.data) {
         throw std::runtime_error(image_name + " failed to load");
     }
     sift(image, noArray(), keypoints, descriptors, false);
     return descriptors;
+}
+
+Mat load_sift_descriptors(const string& image_name) {
+    std::vector<KeyPoint> keypoints;
+    Mat image;
+
+    return load_sift_descriptors(image_name, keypoints, image);
 }
 
 Mat load_sift_descriptors(const FileSet& images) {
@@ -228,59 +238,97 @@ Mat load_sift_descriptors(const FileSet& images) {
 
 Mat aggregate_predictions(const ExtEM& em,
                           const Mat& descriptors) {
-    
     Mat aggr(0, descriptors.cols, CV_32FC1);
-    
-    //cout << "old: " << OUT(aggr) << endl;
     for (int row_idx = 0; row_idx < descriptors.rows; ++row_idx) {
-        /*
-        cout << OUT(descriptors.row(row_idx)) << endl;
-        cout << OUT(descriptors.row(row_idx).cols) << endl;
-        cout << OUT(type_str(descriptors.row(row_idx).type())) << endl;
-        cout << OUT(aggr.row(row_idx)) << endl;
-        cout << OUT(aggr.row(row_idx).cols) << endl;
-        cout << OUT(type_str(descriptors.row(row_idx).type())) << endl;
-        */
         aggr.push_back(em.predict_ex(descriptors.row(row_idx)));
-        //em.predict_ex(descriptors.row(row_idx)).copyTo(dst);
     }
-
-    //cout << OUT(aggr) << endl;
 
     Mat result;
     reduce(aggr, result, 0, CV_REDUCE_MAX);
     return result;
 }
 
-void learn_training_matrix(const Mat& descriptors,
-                          const FileSet& train_pos,
-                          const FileSet& train_neg,
-                          Mat& train_input,
-                          Mat& train_outputs) {
-    int sift_clusters = 5;
-    ExtEM em(sift_clusters, EM::COV_MAT_GENERIC);
-    Mat log_likelihoods;
-    if (!em.train(descriptors)) {
-        cout << "error training" << endl;
-        exit(1);
-    }
+void draw_clustered_keypoints(const ExtEM& em,
+                              const string& file_name) {
+    std::vector<KeyPoint> keypoints;
+    Mat image;
+    Mat img_des = load_sift_descriptors(file_name, keypoints, image);
+    std::vector<Scalar> colors = {{0,0,0,255}, {255,0,0,255}, {0,255,0,255},
+                                  {0,0,255,255}, {255,255,255,255},
+                                  {150,150,0,255}, {0,150,150,255},
+                                  {150, 0,150,255}};
 
-    cout << OUT(em.isTrained()) << endl;
-    cout << OUT(em.getMat("means")) << endl;
+    for (int ii = 0; ii < img_des.rows; ++ii) {
+        Mat ex_out = em.predict_ex(img_des.row(ii));
+        drawKeypoints(image, fn::slice(keypoints, ii, ii + 1), image,
+                      colors[max_idx(ex_out)],
+                      DrawMatchesFlags::DRAW_OVER_OUTIMG |
+                      DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+
+    }
+    namedWindow( "Display Image", CV_WINDOW_AUTOSIZE );
+    imshow( "Display Image", image );
+    waitKey(0);
+}
+
+void extract_nn_matrix(const ExtEM& em,
+                       const FileSet& images,
+                       size_t& res_idx,
+                       Mat& result) {
+    for (size_t img_idx = 0; img_idx < images.size(); ++img_idx, ++res_idx) {
+        Mat img_des = load_sift_descriptors(images[img_idx]);
+        aggregate_predictions(em, img_des).copyTo(result.row(res_idx));
+    }
+}
+
+void learn_training_matrix(const ExtEM& em,
+                           const FileSet& train_pos,
+                           const FileSet& train_neg,
+                           Mat& train_input,
+                           Mat& train_outputs) {
+
+    //draw_clustered_keypoints(em, "bikes/0001.jpg");
 
     train_input = Mat::zeros(train_pos.size() + train_neg.size(),
-                             sift_clusters, CV_32FC1);
+                             em.getInt("nclusters"), CV_32FC1);
     train_outputs = Mat::zeros(train_pos.size() + train_neg.size(),
                                1, CV_32FC1);
 
     size_t res_idx = 0;
+
+    train_outputs.rowRange(0, train_pos.size()) = 1;
+    extract_nn_matrix(em, train_pos, res_idx, train_input);
+    train_outputs.rowRange(train_pos.size(), train_outputs.rows) = Scalar(0);
+    extract_nn_matrix(em, train_neg, res_idx, train_input);
+
+    /*
     for (size_t img_idx = 0; img_idx < train_pos.size(); ++img_idx, ++res_idx) {
         Mat img_des = load_sift_descriptors(train_pos[img_idx]);
         aggregate_predictions(em, img_des).copyTo(train_input.row(res_idx));
         train_outputs.at<float>(res_idx) = 1;
-    }
+        }*/
+/*
+    for (size_t img_idx = 0; img_idx < train_neg.size(); ++img_idx, ++res_idx) {
+        Mat img_des = load_sift_descriptors(train_neg[img_idx]);
+        aggregate_predictions(em, img_des).copyTo(train_input.row(res_idx));
+        train_outputs.at<float>(res_idx) = 0;
+    }*/
+}
 
-    // TODO: do negative examples.
+void generate_testing_matrix(const ExtEM& em,
+                             const FileSet& test_pos,
+                             const FileSet& test_neg,
+                             Mat& test_input,
+                             Mat& test_output) {
+    test_input = Mat::zeros(test_pos.size() + test_neg.size(),
+                            em.getInt("nclusters"), CV_32FC1);
+    test_output = Mat::zeros(test_pos.size() + test_neg.size(),
+                              1, CV_32FC1);
+
+    size_t res_idx = 0;
+    test_output.rowRange(0, test_pos.size()) = 1;
+    extract_nn_matrix(em, test_pos, res_idx, test_input);
+    extract_nn_matrix(em, test_neg, res_idx, test_input);
 }
 /*
   1. load positive training/testing sets
@@ -291,6 +339,21 @@ void learn_training_matrix(const Mat& descriptors,
   6. using posive/negative testing sets for testing.
  */
 
+void test_nn(const CvANN_MLP& net, const Mat& input, const Mat& output) {
+    Mat predicted_output;
+    net.predict(input, predicted_output);
+    cout << OUT(output > 0.5) << endl;
+    cout << OUT(predicted_output > 0.5) << endl;
+
+    cout << OUT((output > 0.5) == (predicted_output > 0.5)) << endl;
+
+    int num_train_correct = countNonZero((output > 0.5) == (predicted_output > 0.5));
+    cout << OUT(num_train_correct) << endl;
+    cout << OUT(output.rows) << endl;
+
+    cout << OUT(float(num_train_correct) / float(output.rows)) << endl;
+}
+
 // objrec positive_dir negative_dir...
 int main( int argc, char** argv )
 {
@@ -300,134 +363,102 @@ int main( int argc, char** argv )
     }
 
     FileSet pos_examples = glob_ex(std::string(argv[1]) + "/*.jpg");
-    FileSet train_examples;
-    FileSet test_examples;
-    split_set(pos_examples, 0.66, train_examples, test_examples);
+    FileSet pos_train_examples;
+    FileSet pos_test_examples;
+    split_set(pos_examples, 0.66, pos_train_examples, pos_test_examples);
 
-    cout << OUT(pos_examples.size()) << endl;
-    cout << OUT(train_examples.size()) << endl;
-    cout << OUT(train_examples) << endl;
-    cout << OUT(test_examples.size()) << endl;
-    cout << OUT(test_examples) << endl;
+    FileSet neg_examples = glob_ex(std::string(argv[2]) + "/*.jpg");
+    FileSet neg_train_examples;
+    FileSet neg_test_examples;
+    split_set(neg_examples, 0.66, neg_train_examples, neg_test_examples);
 
     // TESTING: maximum training size for testing peformance.
     // remove when done testing...
-    train_examples = fn::slice(train_examples, 0, 50);
-    Mat descriptors = load_sift_descriptors(train_examples);
+    pos_train_examples = fn::slice(pos_train_examples, 0, 200);
+    neg_train_examples = fn::slice(neg_train_examples, 0, 200);
+
+    pos_test_examples = fn::slice(pos_test_examples, 0, 200);
+    neg_test_examples = fn::slice(neg_test_examples, 0, 200);
+
+    /*
+    cout << OUT(pos_examples.size()) << endl;
+    cout << OUT(pos_train_examples.size()) << endl;
+    cout << OUT(pos_train_examples) << endl;
+    cout << OUT(pos_test_examples.size()) << endl;
+    cout << OUT(pos_test_examples) << endl;*/
+
+    Mat descriptors = load_sift_descriptors(pos_train_examples);
+    /*
     cout << OUT(descriptors.rows) << endl;
     cout << OUT(descriptors.rowRange(0, 5)) << endl;
-    cout << OUT(descriptors.rowRange(descriptors.rows - 5, descriptors.rows)) << endl;
+    cout << OUT(descriptors.rowRange(descriptors.rows - 5, descriptors.rows)) << endl;*/
 
 
     // opencv neural networks want 32 bit floats.
     Mat converted_descs;
     descriptors.convertTo(converted_descs, CV_32FC1);
 
-    // TODO: populate.
-    FileSet neg_train_examples;
-    Mat nn_train_input;
-    Mat nn_train_ouput;
-    learn_training_matrix(converted_descs,
-                          train_examples,
-                          neg_train_examples,
-                          nn_train_input,
-                          nn_train_ouput);
+    cout << OUT(converted_descs.size()) << endl;
+    //cout << OUT(converted_descs.rowRange(0,5)) << endl;
 
-    cout << OUT(nn_train_input) << endl;
-    cout << OUT(nn_train_ouput) << endl;
+    // Learn EM.
+    int sift_clusters = 10;
+    cout << "START: em training" << endl;
+    ExtEM em(sift_clusters, EM::COV_MAT_GENERIC);
 
-    return 0;
-    /*
-    Mat image;
-    image = imread( argv[1], 1 );
-
-    if( argc != 2 || !image.data )
-    {
-        printf( "No image data \n" );
-        return -1;
-    }
-    SIFT sift;
-    std::vector<KeyPoint> keypoints;
-    Mat descriptors;
-    sift(image, noArray(), keypoints, descriptors, false);
-
-    cout << OUT(descriptors.rowRange(0, 5)) << endl;
-    cout << OUT(descriptors.type()) << endl;
-    cout << type_str(descriptors.type()) << endl;
-
-    ExtEM em(2);
-    Mat log_likelihoods;
-    if(!em.train(descriptors)) {
+    if (!em.train(converted_descs)) {
         cout << "error training" << endl;
         exit(1);
     }
 
+    cout << "STOP: em training" << endl;
+
     cout << OUT(em.isTrained()) << endl;
     cout << OUT(em.getMat("means")) << endl;
-
     //em.diag();
+
+
+    cout << "constructing training matrix" << endl;
+    Mat nn_train_input;
+    Mat nn_train_output;
+    learn_training_matrix(em,
+                          pos_train_examples,
+                          neg_train_examples,
+                          nn_train_input,
+                          nn_train_output);
+
+    cout << "constructing training matrix finished" << endl;
+
+    cout << OUT(nn_train_input) << endl;
+    cout << OUT(nn_train_output) << endl;
+
+    cout << OUT(nn_train_input.cols) << endl;
+    Mat layers = Mat(Matx<int, 1, 3>(nn_train_input.cols, nn_train_input.cols, 1));
+    cout << OUT(layers) << endl;
+    cout << OUT(type_str(layers.type())) << endl;
+    CvANN_MLP net(layers);
+
+    cout << "training neural net";
+    int num_iters = net.train(nn_train_input, nn_train_output, Mat()/*,
+                              Mat(), CvANN_MLP_TrainParams(),
+                              CvANN_MLP::NO_INPUT_SCALE*/);
+
+    cout << "training neural net finished";
+    cout << OUT(num_iters) << endl;
     
-    std::vector<Scalar> colors = {{0,0,0,255}, {255,0,0,255}, {0,255,0,255},
-                                  {0,0,255,255}, {255,255,255,255}};
+    cout << "training set accuracy:" << endl;
+    test_nn(net, nn_train_input, nn_train_output);
 
-    */
-    /*
-    cout << colors[1] << endl;
-    */
+    // Set up testing set matrices
+    Mat nn_test_input;
+    Mat nn_test_outputs;
 
-    /*
-    colors.push_back(Scalar(0,0,0,255));
-    colors.push_back(Scalar(255,0,0,255));
-    colors.push_back(Scalar(0,255,0,255));
-    colors.push_back(Scalar(255,255,255,255));*/
-    /*
-    cout << "predict_ex results:" << endl;
-    for (int ii = 0; ii < descriptors.rows; ++ii) {
-        Mat ex_out = em.predict_ex(descriptors.row(ii));
-    */
-        /*
-        Mat ex_out = em.predict_ex(descriptors.row(ii));
+    generate_testing_matrix(em,
+                            pos_test_examples,
+                            neg_test_examples,
+                            nn_test_input,
+                            nn_test_outputs);
 
-        Mat norm_out;
-        Vec2d result = em.predict(descriptors.row(ii), norm_out);
-
-        if (norm_out.at<double>(0) < norm_out.at<double>(1)) {
-            assert(ex_out.at<double>(0) < ex_out.at<double>(1));
-        }
-
-        if (norm_out.at<double>(0) >= norm_out.at<double>(1)) {
-            assert(ex_out.at<double>(0) >= ex_out.at<double>(1));
-        }
-        //cout << "res: " << result[0] << ", " << result[1] << endl;
-        //cout << "out: " << out << endl;
-
-        cout << OUT(ex_out) << endl;
-        cout << OUT(max_idx(ex_out)) << endl;
-        cout << OUT(result[1]) << endl;
-
-
-        cout << OUT(colors[max_idx(ex_out)]) << endl;
-        */
-    /*
-        drawKeypoints(image, fn::slice(keypoints, ii, ii + 1), image, colors[max_idx(ex_out)],
-                      DrawMatchesFlags::DRAW_OVER_OUTIMG | DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-    }
-    */
-    
-    /*drawKeypoints(image, keypoints, image);*/
-    /*    cout << keypoints.size() << endl;
-    cout << slice(keypoints, 0, 10) << endl;
-    cout << descriptors.cols << endl;*/
-    
-    /*
-    cvtColor(image, gray_image, CV_RGB2GRAY);
-    std::cout << gray_image.size() << std::endl;
-    std::cout << gray_image << std::endl;*/
-    /*
-    namedWindow( "Display Image", CV_WINDOW_AUTOSIZE );
-    imshow( "Display Image", image );
-
-    waitKey(0);
-
-    return 0;*/
+    cout << "testing set accuracy:" << endl;
+    test_nn(net, nn_test_input, nn_test_outputs);
 }
