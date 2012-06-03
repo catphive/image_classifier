@@ -41,13 +41,17 @@ unsigned long get_seed() {
     return t1.tv_usec * t1.tv_sec;
 }
 
+void shuffle(FileSet& set) {
+    static std::default_random_engine engine(get_seed());
+    std::shuffle(set.begin(), set.end(), engine);
+}
+
 void split_set(FileSet set, double train_frac,
                FileSet& train_out, FileSet& test_out) {
     assert(train_frac >= 0);
-    static std::default_random_engine engine(get_seed());
-    std::shuffle(set.begin(), set.end(), engine);
-    size_t train_size = set.size() * train_frac;
+    shuffle(set);
 
+    size_t train_size = set.size() * train_frac;
     train_out.insert(train_out.end(), set.begin(), set.begin() + train_size);
     test_out.insert(test_out.end(), set.begin() + train_size, set.end());
 }

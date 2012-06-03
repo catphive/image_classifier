@@ -1,22 +1,23 @@
 lang_flags = -std=c++0x -Werror -Wall
 #lang_flags = -Werror -Wall
 #CXXFLAGS += $(lang_flags) -g -save-temps 
-CXXFLAGS += $(lang_flags) -g
+CXXFLAGS += $(lang_flags) -g -O3 -pthread
 incl_path = -Iinclude -I/opt/opencv/include
 CPPFLAGS += -MMD -MP $(incl_path) 
 #CPPFLAGS += -MMD -MP $(incl_path) -D_GLIBCXX_DEBUG
 LIB_SRC = $(wildcard src/*.cpp)
 TEST_SRC = $(wildcard test/*.cpp)
 #hardcode location of opencv libs into executables...
-LDFLAGS = -Wl,-R/opt/opencv/lib
+LDFLAGS = -Wl,-R/opt/opencv/lib -pthread
 LDLIBS = -L/opt/opencv/lib -lopencv_core -lopencv_contrib -lopencv_calib3d \
 	-lopencv_features2d -lopencv_flann -lopencv_gpu -lopencv_highgui \
-	-lopencv_imgproc -lopencv_legacy -lopencv_ml -lopencv_nonfree
+	-lopencv_imgproc -lopencv_legacy -lopencv_ml -lopencv_nonfree \
+	 -pthread
 
-all: objrec run_tests TAGS
+all: objrec #run_tests TAGS
 .PHONY: all
 
-TAGS: objrec test/test
+TAGS: objrec #test/test
 	ctags -eR --languages=-Java main.cpp include src test ~/src/opencv
 
 objrec: main.cpp src/libobjrec.a
