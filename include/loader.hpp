@@ -15,6 +15,8 @@ struct Loader {
 
     virtual cv::Mat load(const std::string& image_name) = 0;
     virtual cv::Mat load_set(const FileSet& image_set);
+
+    virtual int em_clusters() = 0;
     
     Loader(const Loader&) = delete;
     Loader& operator=(const Loader&) = delete;
@@ -22,10 +24,12 @@ struct Loader {
 
 struct SIFTLoader: Loader {
     virtual cv::Mat load(const std::string& image_name);
+    virtual int em_clusters();
 };
 
 struct ColorLoader: Loader {
     virtual cv::Mat load(const std::string& image_name);
+    virtual int em_clusters();
 };
 
 typedef cv::Ptr<Loader> LoaderPtr;

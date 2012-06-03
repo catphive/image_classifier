@@ -8,30 +8,16 @@ LoaderVec make_loaders() {
     return {
         {LoaderPtr(new SIFTLoader())},
         {LoaderPtr(new ColorLoader())}
-    };/*
-    return {
-        {LoaderPtr(new SIFTLoader())},
-        {LoaderPtr(new ColorLoader())}
-        };*/
+    };
 }
 
 Mat ColorLoader::load(const string& image_name) {
     Mat image = imread(image_name, 1);
 
-    /*
-    cout << OUT(type_str(image.type())) << endl;
-    
-    namedWindow( "Base Image", CV_WINDOW_AUTOSIZE );
-    imshow("Base Image", image );
-    */
-
     Mat lab_image;
     cvtColor(image, lab_image, CV_BGR2Lab);
-    //cout << OUT(type_str(lab_image.type())) << endl;
 
     Mat pixels(lab_image.rows * lab_image.cols, 3, CV_32FC1);
-    //cout << OUT(lab_image.rows) << endl;
-    //cout << OUT(lab_image.cols) << endl;
     int pixels_idx = 0;
     for(int ii = 0; ii < lab_image.rows; ++ii) {
         for(int jj = 0; jj < lab_image.cols; ++jj, ++pixels_idx) {
@@ -51,9 +37,6 @@ Mat ColorLoader::load(const string& image_name) {
                         1, KMEANS_PP_CENTERS, means);
 
     // DEBUG:
-
-    //cout << OUT(labels.rowRange(200000,200050)) << endl;
-    //cout << OUT(type_str(labels.type())) << endl;
 
     /*
     pixels_idx = 0;
@@ -77,23 +60,6 @@ Mat ColorLoader::load(const string& image_name) {
 
     return means;
 }
-/*
-Mat ColorLoader::load_set(const FileSet& images) {
-    Mat accum;
-    for (const std::string& image_name : images) {
-        Mat descriptors = load(image_name);
-
-        if (accum.empty()) {
-            accum = descriptors;
-        } else {
-            Mat tmp;
-            vconcat(accum, descriptors, tmp);
-            accum = tmp;
-        }
-    }
-
-    return accum;
-    }*/
 
 namespace {
     Mat load_sift_descriptors(const string& image_name,
@@ -156,4 +122,12 @@ Mat Loader::load_set(const FileSet& images) {
     }
 
     return accum;
+}
+
+int SIFTLoader::em_clusters() {
+    return 50;
+}
+
+int ColorLoader::em_clusters() {
+    return 10;
 }

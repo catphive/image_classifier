@@ -14,7 +14,7 @@ LDLIBS = -L/opt/opencv/lib -lopencv_core -lopencv_contrib -lopencv_calib3d \
 	-lopencv_imgproc -lopencv_legacy -lopencv_ml -lopencv_nonfree \
 	 -pthread
 
-all: objrec #run_tests TAGS
+all: objrec TAGS #run_tests 
 .PHONY: all
 
 TAGS: objrec #test/test
