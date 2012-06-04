@@ -240,19 +240,124 @@ NNData extract_nn_data(const ExtEM& em,
     return data;
 }
 
-void test_nn(const CvANN_MLP& net, const Mat& input, const Mat& output) {
+int false_positives(const Mat& output,
+                    const Mat& predicted_output) {
+    assert(output.rows == predicted_output.rows);
+
+    int accum = 0;
+    for (int idx = 0; idx < output.rows; ++idx) {
+        if (predicted_output.at<uchar>(idx) &&
+            !output.at<uchar>(idx)) {
+            ++accum;
+        }
+    }
+
+    return accum;
+}
+
+FileSet collect_false_positives(const Mat& output,
+                                const Mat& predicted_output,
+                                const FileSet& images) {
+    assert(output.rows == predicted_output.rows);
+    FileSet result;
+
+    for (int idx = 0; idx < output.rows; ++idx) {
+        if (predicted_output.at<uchar>(idx) &&
+            !output.at<uchar>(idx)) {
+            result.push_back(images[idx]);
+        }
+    }
+
+    return result;
+}
+
+FileSet collect_false_negatives(const Mat& output,
+                                const Mat& predicted_output,
+                                const FileSet& images) {
+    assert(output.rows == predicted_output.rows);
+    FileSet result;
+
+    for (int idx = 0; idx < output.rows; ++idx) {
+        if (!predicted_output.at<uchar>(idx) &&
+            output.at<uchar>(idx)) {
+            result.push_back(images[idx]);
+        }
+    }
+
+    return result;
+}
+
+int false_negatives(const Mat& output,
+                            const Mat& predicted_output) {
+    assert(output.rows == predicted_output.rows);
+
+    int accum = 0;
+    for (int idx = 0; idx < output.rows; ++idx) {
+        if (!predicted_output.at<uchar>(idx) &&
+            output.at<uchar>(idx)) {
+            ++accum;
+        }
+    }
+
+    return accum;
+}
+
+FileSet collect_correct(const Mat& output,
+                        const Mat& predicted_output,
+                        const FileSet& images) {
+    assert(output.rows == predicted_output.rows);
+    FileSet result;
+
+    for (int idx = 0; idx < output.rows; ++idx) {
+        if (predicted_output.at<uchar>(idx) == output.at<uchar>(idx)) {
+            result.push_back(images[idx]);
+        }
+    }
+
+    return result;
+}
+
+void test_nn(const CvANN_MLP& net, const Mat& input, Mat output, FileSet* images) {
     Mat predicted_output;
     net.predict(input, predicted_output);
-    cout << OUT(output > 0.5) << endl;
-    cout << OUT(predicted_output > 0.5) << endl;
+    cout << OUT(predicted_output) << endl;
+    output = output > 0.5;
+    cout << OUT(output) << endl;
+    predicted_output = predicted_output > 0.5;
+    cout << OUT(predicted_output) << endl;
 
-    cout << OUT((output > 0.5) == (predicted_output > 0.5)) << endl;
+    cout << OUT(output == predicted_output) << endl;
 
-    int num_correct = countNonZero((output > 0.5) == (predicted_output > 0.5));
+    int num_correct = countNonZero(output == predicted_output);
     cout << OUT(num_correct) << endl;
     cout << OUT(output.rows) << endl;
 
     cout << OUT(float(num_correct) / float(output.rows)) << endl;
+    
+    int false_pos = false_positives(output, predicted_output);
+    cout << "false positives: " << false_pos
+         << "(" << float(false_pos) / float(output.rows) << ")" << endl;
+
+    if (images) {
+        cout << collect_false_positives(output, predicted_output, *images)
+             << endl;
+    }
+
+    int false_neg = false_negatives(output, predicted_output);
+    cout << "false negatives: " << false_neg
+         << "(" << float(false_neg) / float(output.rows) << ")" << endl;
+
+    if (images) {
+        cout << collect_false_negatives(output, predicted_output, *images)
+             << endl;
+    }
+
+    if (images) {
+        cout << "sample correct images: "
+             << fn::slice(collect_correct(output, predicted_output, *images),
+                          0, 5)
+             << endl;
+    }
 }
 
 Ptr<ExtEM> train_em(int clusters, const Mat& descriptors) {
@@ -391,7 +496,7 @@ int main( int argc, char** argv )
     cout << OUT(num_iters) << endl;
     
     cout << "TRAINING SET ACCURACY:" << endl;
-    test_nn(net, combined_train_data.nn_input, combined_train_data.nn_output);
+    test_nn(net, combined_train_data.nn_input, combined_train_data.nn_output, NULL);
 
     // Test testing data.
     NNDataVec test_data;
@@ -405,5 +510,14 @@ int main( int argc, char** argv )
     NNData combined_test_data = combine_data(test_data);
 
     cout << "TESTING SET ACCURACY:" << endl;
-    test_nn(net, combined_test_data.nn_input, combined_test_data.nn_output);
+
+    FileSet all_test_examples = pos_test_examples;
+    all_test_examples.insert(all_test_examples.end(),
+                             neg_test_examples.begin(),
+                             neg_test_examples.end());
+    
+    test_nn(net,
+            combined_test_data.nn_input,
+            combined_test_data.nn_output,
+            &all_test_examples);
 }
