@@ -3,7 +3,12 @@
 \begin{document}
 
 \begin{frame}{Introduction}
-  An image classifier.
+\begin{center}
+  An Image Classifier
+
+  Brendan Miller
+\end{center}
+
 \begin{itemize}
   \item An image classifier based on the generative/discriminative framework
   presented in Yi Li's paper.
@@ -11,8 +16,16 @@
   \item Uses SIFT key-point descriptors and color.
 \end{itemize}
 
-Brendan Miller
+\end{frame}
 
+\begin{frame}{Basic Idea}
+  A quick high level summary of Li's classification framework:
+  \begin{itemize}
+    \item Build a mixture model of features in an images containing a class of objects.
+    \item Determine how well a training set of images match each component of the model.
+    \item Build a vector of these match values (joint probabilities).
+    \item Use these values as the inputs to train a classifier (a neural network).
+  \end{itemize}
 \end{frame}
 
 \begin{frame}{Generative/discriminative model part 1}
