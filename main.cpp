@@ -18,6 +18,8 @@
 #include <stdexcept>
 #include <string>
 
+#include <getopt.h>
+
 using namespace cv;
 
 using std::cout;
@@ -40,7 +42,10 @@ std::ostream& operator<<(std::ostream& out, const cv::Scalar& scalar) {
                << scalar[2] << ", " << scalar[3] << ")";
 }
 
-
+/*
+  Returns text name of opencv array type integer.
+  type: an opencv matrix element type.
+ */
 std::string type_str(int type) {
 
     switch(type) {
@@ -71,6 +76,10 @@ std::string type_str(int type) {
     }
 }
 
+// This derived class works around some limitations in opencv's EM
+// implementation.
+// Specifically, opencv's EM implementation returns posterior probabilities,
+// whereas this classifier is only interested in joint probabilities.
 struct ExtEM : cv::EM {
     ExtEM(int nclusters=EM::DEFAULT_NCLUSTERS, int covMatType=EM::COV_MAT_DIAGONAL,
           const TermCriteria& termCrit=TermCriteria(TermCriteria::COUNT+
@@ -110,6 +119,7 @@ struct ExtEM : cv::EM {
     // Opencv's EM implementation only retrieves posterior probability,
     // which would not be appropriate the generative/descriminative method.
     // This this modified function extracts the joint probability instead.
+    // Aside from that, no changes were made to the function.
     void compute_joint_prob(const Mat& sample, Mat& joint_probs) const
     {
         // L_ik = log(weight_k) - 0.5 * log(|det(cov_k)|) - 0.5 *(x_i - mean_k)' cov_k^(-1) (x_i - mean_k)]
@@ -149,6 +159,7 @@ struct ExtEM : cv::EM {
 
 typedef Ptr<ExtEM> ExtEMPtr;
 
+// Training data for neural networks.
 struct NNData {
     Mat nn_input;
     Mat nn_output;
@@ -156,11 +167,14 @@ struct NNData {
 
 typedef vector<NNData> NNDataVec;
 
+// Model for a feature, including statistical model and function for
+// extracting features from images.
 struct FeatureModel {
     LoaderPtr loader;
     ExtEMPtr em;
 };
 
+// Returns the index of the maximum element of an opencv vector.
 size_t max_idx(const Mat& vec) {
     double max = -DBL_MAX;
     size_t max_idx = 0;
@@ -175,22 +189,26 @@ size_t max_idx(const Mat& vec) {
 }
 
 void usage() {
-    cerr << "USAGE: objrec positive_example_dir negative_example_dir ..." << endl;
+    cerr << "USAGE: objrec [-f n] positive_example_dir negative_example_dir ...\\" 
+         << "    -f n  specifies index of feature to use. If not specified\n"
+         << "          use all feature types at once.\n"
+         << "          -f 0 selects only SIFT.\n"
+         << "          -f 1 selects only CIA L*a*b* color."
+         << endl;
 }
 
+/* Determine how well descriptors match against the components of em.
+   Return an opencv row vector of the maximum matchs for each
+   component.  Note that by "match" I'm referring to the joint
+   probability of a feature and a component gaussian.
+*/
 Mat aggregate_predictions(const ExtEM& em,
                           const Mat& descriptors) {
-    //cout << "START: aggregate_predictions" << endl;
     Mat predictions(descriptors.rows, em.getInt("nclusters"), CV_64F);
     for (int row_idx = 0; row_idx < descriptors.rows; ++row_idx) {
         Mat tmp = em.predict_ex(descriptors.row(row_idx));
-        //cout << OUT(tmp.size()) << endl;
-        //cout << OUT(type_str(tmp.type())) << endl;
-        //cout << OUT(predictions.row(row_idx).size()) << endl;
-        //cout << OUT(type_str(predictions.row(row_idx).type())) << endl;
-        tmp.copyTo(predictions.row(row_idx));
-        //predict_mats.push_back(em.predict_ex(descriptors.row(row_idx)));
-    }
+         tmp.copyTo(predictions.row(row_idx));
+     }
 
     Mat aggr;
     reduce(predictions, aggr, 0, CV_REDUCE_MAX);
@@ -198,32 +216,41 @@ Mat aggregate_predictions(const ExtEM& em,
     Mat result;
     aggr.convertTo(result, CV_32FC1);
 
-    //cout << OUT(result.size()) << endl;
-    //cout << OUT(type_str(result.type())) << endl;
-
-    //cout << "STOP: aggregate_predictions" << endl;
     return result;
 }
 
+/*
+  Extract a set of aggregated joint probabilities of image features
+  with respect to a guassian mixture model.
+  em: A gaussian mixture model.
+  images: A set of images.
+  loader: An object that extracts features from images.
+  res_idx: row of result to write to. Increments res_idx after writing each row.
+  result: output matrix.
+ */
 void extract_nn_matrix(const ExtEM& em,
                        const FileSet& images,
                        LoaderPtr loader,
                        size_t& res_idx,
                        Mat& result) {
     for (size_t img_idx = 0; img_idx < images.size(); ++img_idx, ++res_idx) {
-        //cout << "START: loader->load" << endl;
         Mat img_des = loader->load(images[img_idx]);
-        //cout << "STOP: loader->load" << endl;
-        //cout << OUT(result.row(res_idx).size()) << endl;
-        //cout << OUT(type_str(result.row(res_idx).type())) << endl;
         aggregate_predictions(em, img_des).copyTo(result.row(res_idx));
     }
 }
 
+/*
+  Extract neural network training data from a mixture model and
+  positive and negative training examples.
+  em: A gaussian mixture model.
+  train_pos: positive training examples.
+  train_neg: negative training examples.
+  loader: Responsible for extracting the correct type of feature.
+ */
 NNData extract_nn_data(const ExtEM& em,
-                     const FileSet& train_pos,
-                     const FileSet& train_neg,
-                     LoaderPtr loader) {
+                       const FileSet& train_pos,
+                       const FileSet& train_neg,
+                       LoaderPtr loader) {
     NNData data;
 
     data.nn_input = Mat::zeros(train_pos.size() + train_neg.size(),
@@ -240,6 +267,9 @@ NNData extract_nn_data(const ExtEM& em,
     return data;
 }
 
+/*
+  Return the number of false positives by comparing output and predicted_output.
+ */
 int false_positives(const Mat& output,
                     const Mat& predicted_output) {
     assert(output.rows == predicted_output.rows);
@@ -255,6 +285,10 @@ int false_positives(const Mat& output,
     return accum;
 }
 
+/*
+  Returns all false positives from imeages by comparing output and
+  predicted_output.
+ */
 FileSet collect_false_positives(const Mat& output,
                                 const Mat& predicted_output,
                                 const FileSet& images) {
@@ -271,6 +305,10 @@ FileSet collect_false_positives(const Mat& output,
     return result;
 }
 
+/*
+  Returns all false negatives from imeages by comparing output and
+  predicted_output.
+ */
 FileSet collect_false_negatives(const Mat& output,
                                 const Mat& predicted_output,
                                 const FileSet& images) {
@@ -287,8 +325,11 @@ FileSet collect_false_negatives(const Mat& output,
     return result;
 }
 
+/*
+  Return the number of false negatives by comparing output and predicted_output.
+ */
 int false_negatives(const Mat& output,
-                            const Mat& predicted_output) {
+                    const Mat& predicted_output) {
     assert(output.rows == predicted_output.rows);
 
     int accum = 0;
@@ -302,6 +343,10 @@ int false_negatives(const Mat& output,
     return accum;
 }
 
+/*
+  Returns all correctly classified images by comparing output to
+  predicted output.
+ */
 FileSet collect_correct(const Mat& output,
                         const Mat& predicted_output,
                         const FileSet& images) {
@@ -317,6 +362,11 @@ FileSet collect_correct(const Mat& output,
     return result;
 }
 
+/*
+  Collect and print accuracy of neural network net the provided input
+  and output. If images is not NULL, also printed false positives,
+  false negatives, and some example correct classifications.
+ */
 void test_nn(const CvANN_MLP& net, const Mat& input, Mat output, FileSet* images) {
     Mat predicted_output;
     net.predict(input, predicted_output);
@@ -360,6 +410,10 @@ void test_nn(const CvANN_MLP& net, const Mat& input, Mat output, FileSet* images
     }
 }
 
+/*
+  Train and return a gaussian mixture model with the specified number
+  of clusters from the provided descriptors.
+ */
 Ptr<ExtEM> train_em(int clusters, const Mat& descriptors) {
     Ptr<ExtEM> em = new ExtEM(clusters/*, EM::COV_MAT_GENERIC*/);
 
@@ -374,6 +428,10 @@ Ptr<ExtEM> train_em(int clusters, const Mat& descriptors) {
     return em;
 }
 
+/*
+  Learn a model from the positive training example images using loader
+  to extract features.
+ */
 FeatureModel learn_model(const FileSet& pos_train_examples,
                          LoaderPtr loader) {
     FeatureModel model;
@@ -383,7 +441,6 @@ FeatureModel learn_model(const FileSet& pos_train_examples,
     Mat descriptors = loader->load_set(pos_train_examples);
     cout << "finished loading descriptors" << endl;
 
-    // TODO: is this really necessary? seems so for SIFT...
     cout << "START: converting descriptors" << endl;
     Mat converted_descs;
     descriptors.convertTo(converted_descs, CV_32FC1);
@@ -399,6 +456,9 @@ FeatureModel learn_model(const FileSet& pos_train_examples,
     return model;
 }
 
+/*
+  Append mat_in to the right side of mat_out
+*/
 void append_horiz(const Mat& mat_in, Mat& mat_out) {
     if (mat_out.empty()) {
         mat_out = mat_in;
@@ -409,12 +469,12 @@ void append_horiz(const Mat& mat_in, Mat& mat_out) {
     }
 }
 
+/*
+  Combine the neural network training data in data_vec and return it.
+ */
 NNData combine_data(const NNDataVec& data_vec) {
-    cout << "START: combine_data" << endl;
     NNData result;
 
-    // TODO: consider just creating the result matrix all at once.
-    // This is not efficient.
     for (const NNData& data : data_vec) {
         if (result.nn_output.empty()) {
             result.nn_output = data.nn_output;
@@ -422,26 +482,59 @@ NNData combine_data(const NNDataVec& data_vec) {
         append_horiz(data.nn_input, result.nn_input);
     }
 
-    cout << "STOP: combine_data" << endl;
     return result;
 }
 
-// objrec positive_dir negative_dir...
+// objrec [-f n] positive_dir negative_dir...
 int main( int argc, char** argv )
 {
-    if (argc < 3) {
+    static struct option long_options[] = {
+        {"help",           required_argument, NULL, 'h'},
+        {"only-feature",   required_argument, NULL, 'f'},
+        {0, 0, 0, 0}
+    };
+
+    int option_index = 0;
+    int ch = 0;
+    int only_feature = -1;
+    while ((ch = getopt_long (argc, argv, "f:",
+                              long_options, &option_index)) != -1) {
+        switch (ch) {
+        case 'h':
+            usage();
+            return 0;
+        case 'f':
+            only_feature = atoi(optarg);
+            break;
+        case '?':
+            if (isprint (optopt)) {
+                fprintf (stderr, "Unknown option `-%c'.\n", optopt);
+            } else {
+                fprintf (stderr,
+                         "Unknown option character `\\x%x'.\n",
+                         optopt);
+            }
+            usage();
+            return 1;
+        default:
+            abort ();
+        }
+    }
+
+    if (argc - optind < 3) {
         usage();
         return 1;
     }
 
-    FileSet pos_examples = glob_ex(std::string(argv[1]) + "/*.jpg");
+    FileSet pos_examples = glob_ex(std::string(argv[optind]) + "/*.jpg");
     FileSet pos_train_examples;
     FileSet pos_test_examples;
     split_set(pos_examples, 0.66, pos_train_examples, pos_test_examples);
 
     FileSet neg_train_examples;
     FileSet neg_test_examples;
-    for (int arg_idx = 2; arg_idx < argc; ++arg_idx) {
+
+    for (int arg_idx = optind + 1; arg_idx < argc; ++arg_idx) {
         FileSet neg_examples = glob_ex(std::string(argv[arg_idx]) + "/*.jpg");
         split_set(neg_examples, 0.66, neg_train_examples, neg_test_examples);
     }
@@ -452,7 +545,6 @@ int main( int argc, char** argv )
     cout << OUT(neg_train_examples.size()) << endl;
     cout << OUT(neg_test_examples.size()) << endl;
 
-    // TODO: reduce maximum training size to level mentioned in assignment?
     pos_train_examples = fn::slice(pos_train_examples, 0, 200);
     neg_train_examples = fn::slice(neg_train_examples, 0, 200);
 
@@ -461,6 +553,12 @@ int main( int argc, char** argv )
 
     
     LoaderVec loaders = make_loaders();
+
+    if (only_feature >= 0) {
+        cout << "using only feature " << only_feature << endl;
+        loaders = fn::slice(loaders, only_feature, only_feature + 1);
+    }
+
     vector<FeatureModel> models;
     vector<NNData> train_data;
     for (LoaderPtr loader : loaders) {
@@ -477,7 +575,6 @@ int main( int argc, char** argv )
 
     NNData combined_train_data = combine_data(train_data);
 
-    // TODO: experiment with smaller hidden layer.
     Mat layers = Mat(Matx<int, 1, 3>(combined_train_data.nn_input.cols,
                                      combined_train_data.nn_input.cols,
                                      1));

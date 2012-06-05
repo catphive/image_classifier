@@ -8,11 +8,15 @@
 #include <ostream>
 #include <vector>
 #include <limits>
-//#include <type_traits>
 #include <cstdarg>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdarg.h>
+
+/*
+  This file contains a bunch of general purpose C++ utilities I've
+  written over time.
+ */
 
 namespace fn {
 

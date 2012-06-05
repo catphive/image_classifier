@@ -1,0 +1,42 @@
+Prerequisites:
+
+0. POSIX.
+1. GNU Make.
+2. G++ 4.6 or better.
+3. OpenCV 2.4.1 installed in /opt/opencv
+   
+   Note that this version is important. Earlier versions of opencv had
+   a nasty bug in the EM implementation that would zero out the
+   covariance matrix in some situations.
+
+   My executable is currently hardcoded to find opencv in the
+   /opt/opencv directory (though this can be edited in the makefile by
+   adjusting the -I and -R paths).
+
+   Download opencv from here:
+   http://sourceforge.net/projects/opencvlibrary/files/opencv-unix/2.4.1/
+
+   To install opencv follow these steps.
+   cd ~/<your_working_dir>/opencv  # the directory should contain CMakeLists.txt, INSTALL etc.
+   mkdir release # create the output directory
+   cd release
+   cmake -D CMAKE_BUILD_TYPE=RELEASE -D CMAKE_INSTALL_PREFIX=/opt/opencv ..
+
+Running:
+
+Extract .jpg images of each class into separate directories.
+
+Assuming you have separate directories of images of bikes, faces,
+planes, and cars you can run the object recognition program like this:
+
+./objrec bikes faces places cars
+
+and it will use "bikes" as the positive image set, and the rest as the
+negative. It will train a classifier, test it, and then report the
+results.
+
+To restrict the program to only using a specific kind of feature pass
+a -f flag to the program.
+
+-f 0 means only use SIFT and -f 1 means only use color. By default all
+ feature types are used.

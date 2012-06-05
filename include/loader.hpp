@@ -9,13 +9,27 @@
 #include <vector>
 #include <string>
 
+/*
+  Responsible for loading descriptors from files.
+ */
 struct Loader {
     Loader() {}
     virtual ~Loader() {}
 
+    /*
+      Returns descriptors from image_name.
+     */
     virtual cv::Mat load(const std::string& image_name) = 0;
+    /*
+      Returns descriptors from all images in image_set.
+     */
     virtual cv::Mat load_set(const FileSet& image_set);
 
+
+    /*
+      Returns the appropriate number of clusters in a guassian mixture
+      model of the descriptors returned by this loader.
+     */
     virtual int em_clusters() = 0;
     
     Loader(const Loader&) = delete;
