@@ -1,3 +1,19 @@
+Background:
+
+This project implements an image classifier based on the UW paper
+A Generative/Discriminative Learning Algorithm for Image Classification.
+
+See: http://homes.cs.washington.edu/~shapiro/iccv2005.pdf
+
+This was originally implemented for a UW grad class in computer vision.
+
+An overview of the project and results can be found here:
+https://github.com/catphive/image_classifier/blob/master/report.pdf
+
+Slides for a presentation on the project can be found here:
+https://github.com/catphive/image_classifier/blob/master/slides.pdf
+
+
 Prerequisites:
 
 0. POSIX.
